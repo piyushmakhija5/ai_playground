@@ -14,7 +14,7 @@ os.environ["SERPER_API_KEY"] = os.getenv("SERPER_API_KEY")
 os.environ["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY")
 
 ## Initialize LLM
-llm = ChatGroq(model="mixtral-8x7b-32768", temperature=0)
+llm = ChatGroq(model="gemma-7b-it", temperature=0)
 
 # Input data
 resume = read_all_pdf_pages("data/resume.pdf")
@@ -29,7 +29,7 @@ crew = Crew(
     agents=[job_requirements_researcher, resume_swot_analyzer],
     tasks=[research, swot_analysis],
     verbose=1,
-    process=Process.sequential(),
+    process=Process.sequential,
 )
 
 # Kickoff crew
