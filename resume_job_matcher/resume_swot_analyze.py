@@ -2,7 +2,7 @@
 import os
 from crewai import Crew, Process
 from dotenv import load_dotenv, find_dotenv  # Groq, SerpApi
-from langchain_groq import ChatGroq  # Mixtral
+from langchain_groq import ChatGroq  # Mixtral, Gemma, Llama2
 from utils import *
 from agents import agents
 from tasks import tasks
