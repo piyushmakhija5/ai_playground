@@ -1,4 +1,5 @@
 import os
+from langchain.llms import Ollama
 from crewai import Agent, Crew, Process, Task
 from dotenv import load_dotenv, find_dotenv  # Groq
 from langchain_groq import ChatGroq  # Mixtral, Gemma, Llama2
@@ -10,6 +11,8 @@ os.environ["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY")
 
 ## Initialize LLM
 llm = ChatGroq(model="gemma-7b-it", temperature=0)
+# ollama_openhermes = Ollama(model="openhermes")
+
 
 marketer = Agent(
     role="Market Research Analyst",
@@ -20,6 +23,7 @@ marketer = Agent(
     how to appeal to the widest possible audience""",
     verbose=True,  # Enable detailed logs
     allow_delegation=True,  # Enable agents to collaborate
+    # llm=ollama_openhermes,
 )
 
 technologist = Agent(
@@ -35,6 +39,7 @@ technologist = Agent(
     but also provides a competitive edge in the market.""",
     verbose=True,  # Enable detailed logs
     allow_delegation=True,  # Enable agents to collaborate
+    # llm=ollama_openhermes,
 )
 
 business_consultant = Agent(
@@ -49,6 +54,7 @@ business_consultant = Agent(
     thrive in a changing market.""",
     verbose=True,  # Enable detailed logs
     allow_delegation=True,  # Enable agents to collaborate
+    # llm=ollama_openhermes,
 )
 
 
