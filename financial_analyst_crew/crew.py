@@ -33,3 +33,13 @@ class FinancialAnalystCrew:
         return Task(
             config=self.tasks_config["analyze_company_task"], agent=self.company_analyst
         )
+
+    @crew
+    def crew(self) -> Crew:
+        """Creates the FinancialAnalystCrew crew"""
+        return Crew(
+            agents=self.agents,
+            tasks=self.tasks,
+            process=Process.sequential(),
+            verbose=2,
+        )
