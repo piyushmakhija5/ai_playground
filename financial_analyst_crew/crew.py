@@ -20,3 +20,16 @@ class FinancialAnalystCrew:
     @agent
     def company_analyst(self) -> Agent:
         return Agent(config=self.agents_config["company_analyst"], llm=self.groq_llm)
+
+    @task
+    def research_company_task(self) -> Task:
+        return Task(
+            config=self.tasks_config["research_company_task"],
+            agent=self.company_researcher,
+        )
+
+    @task
+    def analyze_company_task(self) -> Task:
+        return Task(
+            config=self.tasks_config["analyze_company_task"], agent=self.company_analyst
+        )
