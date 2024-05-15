@@ -5,9 +5,9 @@ research_company_task:
   expected_output: >
     All of the relevant financial information about the company's stock performance.
 
-analyze_task:
+analyze_company_task:
   description: >
-    Take {Company_name}'s financial information, analyze it, and provide a financial analysis, including profitability ratios,
+    Take {company_name}'s financial information, analyze it, and provide a financial analysis, including profitability ratios,
     Liquidity ratios, Solvency ratios, Efficiency ratios, Growth ratios, Growth metrics, Valuation metrics and Cashflow
   expected_output: >
     A nicely formatted analysis including all of the financial metrics necessary for a thorough financial analysis of a company
