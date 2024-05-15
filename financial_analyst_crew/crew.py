@@ -1,5 +1,5 @@
 from crewai import Agent, Crew, Process, Task
-from crewai.project import CrewaBase, agent, crew, Task
+from crewai.project import CrewBase, agent, crew, task
 from langchain_groq import ChatGroq
 
 
@@ -25,13 +25,14 @@ class FinancialAnalystCrew:
     def research_company_task(self) -> Task:
         return Task(
             config=self.tasks_config["research_company_task"],
-            agent=self.company_researcher,
+            agent=self.company_researcher(),
         )
 
     @task
     def analyze_company_task(self) -> Task:
         return Task(
-            config=self.tasks_config["analyze_company_task"], agent=self.company_analyst
+            config=self.tasks_config["analyze_company_task"],
+            agent=self.company_analyst(),
         )
 
     @crew
@@ -40,6 +41,6 @@ class FinancialAnalystCrew:
         return Crew(
             agents=self.agents,
             tasks=self.tasks,
-            process=Process.sequential(),
+            process=Process.sequential,
             verbose=2,
         )
