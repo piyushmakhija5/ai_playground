@@ -1,21 +1,25 @@
 import os
 from dotenv import load_dotenv
 from crewai import Agent, Task, Crew, Process
-import numpy as np
 import pandas as pd
+import numpy as np
 import json
+import streamlit as st
+import time
+import threading
 
 load_dotenv()
 
-# Define your agents (excluding report_generation_agent for now)
+# Define the agents with updated backstories to reflect monetary units in INR
 
 credit_decision_manager = Agent(
     role='Credit Decision Manager',
     goal='Oversee the credit assessment process and interface with customers',
     backstory="""You are the customer-facing representative and orchestrator of the credit underwriting team.
 You ensure that client needs are met and coordinate the workflow among the team members.
-You have a deep understanding of the key terms and dataset structure provided, and you make sure the team interprets the data exactly as specified.""",
-    verbose=True,
+You have a deep understanding of the key terms and dataset structure provided, and you make sure the team interprets the data exactly as specified.
+All monetary values are in Indian Rupees (INR).""",
+    verbose=False,
     allow_delegation=True
 )
 
@@ -23,19 +27,20 @@ data_ingestion_analyst = Agent(
     role='Data Ingestion and Analyst Agent',
     goal='Analyze preprocessed financial data to prepare signals for creditworthiness determination',
     backstory="""You specialize in handling financial data that has been preprocessed.
-You interpret the provided data exactly as specified and extract relevant features and insights for credit assessment.""",
-    verbose=True,
+You interpret the provided data exactly as specified and extract relevant features and insights for credit assessment.
+All monetary values are in Indian Rupees (INR).""",
+    verbose=False,
     allow_delegation=False
 )
 
 credit_risk_assessment = Agent(
     role='Credit Risk Assessment Agent',
-    goal='Evaluate the creditworthiness of entities using precise financial metrics and credit scoring models',
+    goal='Evaluate the creditworthiness of entities using precise financial metrics',
     backstory="""You are an expert in financial analysis and risk modeling.
 You use the provided metrics to assess credit risk accurately.
-You understand the specific data and how it impacts credit risk.
-You will prepare an overall assessment, including a score out of 10, focusing on what qualifies or disqualifies the business as credit-worthy.""",
-    verbose=True,
+Based on the available data, you will prepare an overall assessment, including a score out of 10, focusing on what qualifies or disqualifies the business as credit-worthy.
+All monetary values are in Indian Rupees (INR).""",
+    verbose=False,
     allow_delegation=False
 )
 
@@ -45,55 +50,42 @@ qa_agent = Agent(
     backstory="""You meticulously review outputs from other agents.
 Your attention to detail ensures that all findings are precise before they are finalized.
 You verify that the data interpretations and calculations adhere exactly to the specified dataset structure and key terms.
-Confirm that the final report meets the formatting and content requirements.""",
-    verbose=True,
+Confirm that the final report meets the formatting and content requirements.
+All monetary values are in Indian Rupees (INR).""",
+    verbose=False,
     allow_delegation=False
 )
 
-# Define the key terms and dataset structure
+# Function to escape curly braces in strings
+def escape_curly_braces(s):
+    return s.replace('{', '{{').replace('}', '}}')
 
-key_terms_and_structure = """
-Key Terms:
-- GST: Tax on goods/services, varies by category.
-- Excl GST: Cost without GST.
+# Function to convert NumPy and pandas types to native Python types
+def convert_numpy_types(obj):
+    if isinstance(obj, dict):
+        return {convert_numpy_types(k): convert_numpy_types(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(v) for v in obj]
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, pd.Period):
+        return str(obj)
+    elif pd.isna(obj):
+        return None
+    else:
+        return obj
 
-Dataset Structure:
-1. Order Id: Unique per order.
-2. SKU ID: Unique product identifier.
-3. Product Category: Grouping of SKUs based on type of product.
-4. Order Date: DD-MM-YY format.
-5. Order Status: 'delivered', 'returned', 'free_replacement' (treat 'free_replacement' as 'returned' unless specified).
-6. Listing Gmv: Gross value, before discount.
-7. Shipping Discount
-8. Self Discount
-9. Total Discount: Sum of Shipping and Self Discount.
-10. Net Sales Excl Gst: This is the effective total sale for each order.
-11. Delivered Charges Excl Gst
-12. Returned Charges Excl Gst
-13. Free Replacement Charges Excl Gst (part of returned order charges unless specified).
-14. Indirect Charges Excl Gst
-15. Net Revenue Excl Gst: This is the final revenue or profit we are making from the sale.
-16. Output Gst: GST/Tax liability for us.
-17. Input Credit Gst: Reduction in our GST/Tax liability.
-18. TCS: Tax Collected at Source at the time of sale.
-19. TDS: Tax Deducted at Source (refundable if order is returned).
-
-Column Relations:
-- Total Discount = Self Discount + Shipping Discount
-- Returned Charges Excl Gst = Free Replacement Charges Excl Gst + other return charges
-- Total Tax liability = Output Gst - Input Credit Gst
-- Total Charges/Fee (Cost of Doing Business on marketplace) = Delivered Charges Excl Gst + Returned Charges Excl Gst + Free Replacement Charges Excl Gst + Indirect Charges Excl Gst
-- Biggest/Largest Charge/Fee: Charge or fee with the highest absolute value.
-"""
-
-# Function to preprocess and analyze the financial data
-
-def preprocess_financial_data(csv_file_path):
+# Updated preprocess_financial_data function with additional metrics
+def preprocess_financial_data(file):
     import pandas as pd
     import numpy as np
 
     # Load the data
-    df = pd.read_excel(csv_file_path)
+    df = pd.read_excel(file)
 
     # Ensure correct data types for numeric columns
     numeric_columns = [
@@ -139,7 +131,7 @@ def preprocess_financial_data(csv_file_path):
     ]
     df['Biggest Charge/Fee'] = df[charges_cols].abs().max(axis=1)
 
-    # Additional Metrics
+    # Existing Metrics
 
     # Total number of orders
     total_orders = len(df)
@@ -230,18 +222,52 @@ def preprocess_financial_data(csv_file_path):
     else:
         average_order_growth = 0
         average_net_sales_growth = 0
+        orders_per_month = pd.Series(dtype='float64')
+        net_sales_per_month = pd.Series(dtype='float64')
+        order_growth = pd.Series(dtype='float64')
+        net_sales_growth = pd.Series(dtype='float64')
+        return_rate_per_month = pd.Series(dtype='float64')
+
+    # Additional Metrics based on available data
+
+    # Cost of Doing Business Percentage
+    total_charges_fee = df['Total Charges/Fee'].sum()
+    codb_percentage = (total_charges_fee / total_net_sales * 100) if total_net_sales > 0 else 0
+
+    # Total Tax Liability Percentage
+    total_tax_liability = df['Total Tax liability'].sum()
+    total_tax_liability_percentage = (total_tax_liability / total_net_sales * 100) if total_net_sales > 0 else 0
+
+    # TCS Sum and TCS Percentage
+    total_tcs = df['TCS'].sum()
+    tcs_percentage = (total_tcs / total_net_sales * 100) if total_net_sales > 0 else 0
+
+    # TDS Sum and TDS Percentage
+    total_tds = df['TDS'].sum()
+    tds_percentage = (total_tds / total_net_sales * 100) if total_net_sales > 0 else 0
+
+    # Profit Margin Percentage
+    net_revenue = df['Net Revenue Excl Gst'].sum()
+    profit_margin_percentage = (net_revenue / total_net_sales * 100) if total_net_sales > 0 else 0
+
+    # Delivery Rate
+    if 'Order Status' in df.columns:
+        total_delivered = df[df['Order Status'].str.lower() == 'delivered'].shape[0]
+        delivery_rate = (total_delivered / total_orders * 100) if total_orders > 0 else 0
+    else:
+        delivery_rate = 0
 
     # Assemble the summary
     summary = {
-        'Total Discount Sum': total_discount,
-        'Total Tax Liability Sum': df['Total Tax liability'].sum(),
-        'Total Charges/Fee Sum': df['Total Charges/Fee'].sum(),
-        'Average Biggest Charge/Fee': df['Biggest Charge/Fee'].mean(),
-        'Total Net Sales Excl Gst': total_net_sales,
-        'Total Net Revenue Excl Gst': df['Net Revenue Excl Gst'].sum(),
-        'Total Listing Gmv': df['Listing Gmv'].sum(),
+        'Total Discount Sum (INR)': total_discount,
+        'Total Tax Liability Sum (INR)': total_tax_liability,
+        'Total Charges/Fee Sum (INR)': total_charges_fee,
+        'Average Biggest Charge/Fee (INR)': df['Biggest Charge/Fee'].mean(),
+        'Total Net Sales Excl Gst (INR)': total_net_sales,
+        'Total Net Revenue Excl Gst (INR)': net_revenue,
+        'Total Listing Gmv (INR)': df['Listing Gmv'].sum(),
         'Total Orders': total_orders,
-        'Average Order Value': average_order_value,
+        'Average Order Value (INR)': average_order_value,
         'Discount Percentage': discount_percentage,
         'SKUs Discount Coverage Percentage': skus_discount_coverage,
         'Self Discount Ratio': self_discount_ratio,
@@ -255,156 +281,60 @@ def preprocess_financial_data(csv_file_path):
         'Total Categories': total_categories,
         'Average Monthly Order Growth (%)': average_order_growth,
         'Average Monthly Net Sales Growth (%)': average_net_sales_growth,
-        # Include time series data if needed
-        # Remember to convert keys to strings
         'Orders Per Month': orders_per_month.to_dict(),
-        'Net Sales Per Month': net_sales_per_month.to_dict(),
+        'Net Sales Per Month (INR)': net_sales_per_month.to_dict(),
         'Order Growth Rate Per Month (%)': order_growth.to_dict(),
         'Net Sales Growth Rate Per Month (%)': net_sales_growth.to_dict(),
         'Return Rate Per Month (%)': return_rate_per_month.to_dict(),
+        'Cost of Doing Business Percentage': codb_percentage,
+        'Total Tax Liability Percentage': total_tax_liability_percentage,
+        'TCS Sum (INR)': total_tcs,
+        'TCS Percentage': tcs_percentage,
+        'TDS Sum (INR)': total_tds,
+        'TDS Percentage': tds_percentage,
+        'Profit Margin Percentage': profit_margin_percentage,
+        'Delivery Rate': delivery_rate,
         # Add more summary metrics as needed
     }
 
     return df, summary
 
-# Function to escape curly braces in strings
-def escape_curly_braces(s):
-    return s.replace('{', '{{').replace('}', '}}')
+# Streamlit App
+def main():
+    st.title("Credit Risk Assessment Application")
+    st.write("Please provide the company details and upload the financial data.")
 
-# Function to convert NumPy data types to native Python data types
-def convert_numpy_types(obj):
-    if isinstance(obj, dict):
-        return {convert_numpy_types(k): convert_numpy_types(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_numpy_types(v) for v in obj]
-    elif isinstance(obj, np.integer):
-        return int(obj)
-    elif isinstance(obj, np.floating):
-        return float(obj)
-    elif isinstance(obj, np.ndarray):
-        return obj.tolist()
-    elif isinstance(obj, pd.Period):
-        return str(obj)
-    elif pd.isna(obj):
-        return None
-    else:
-        return obj
+    # Input fields
+    company_name = st.text_input("Company Name")
+    uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
 
+    if company_name and uploaded_file:
+        # st.write(f"**Company Name:** {company_name}")
 
-if __name__ == "__main__":
-    inputs = {
-        "company_name": input("Company Name?\n"),
-        "csv_file": input("Upload Excel file path:\n")
-    }
+        # Preprocess the data
+        df, data_summary = preprocess_financial_data(uploaded_file)
 
-    # Ensure the file exists
-    if not os.path.isfile(inputs['csv_file']):
-        print(f"Error: The file {inputs['csv_file']} does not exist.")
-        exit(1)
+        # Convert data types
+        data_summary_converted = convert_numpy_types(data_summary)
 
-    # Preprocess the data
-    df, data_summary = preprocess_financial_data(inputs['csv_file'])
+        # Include the data summary in inputs for agents to use
+        inputs = {
+            "company_name": company_name,
+            "data_summary": data_summary_converted
+        }
 
-    # Convert NumPy data types to native Python types
-    data_summary_converted = convert_numpy_types(data_summary)
+        # Convert data_summary to a JSON-formatted string and escape curly braces
+        data_summary_str = json.dumps(data_summary_converted, indent=4)
+        escaped_data_summary = escape_curly_braces(data_summary_str)
 
-    # Include the data summary in inputs for agents to use
-    inputs['data_summary'] = data_summary_converted
-
-    # Convert data_summary to a JSON-formatted string and escape curly braces
-    data_summary_str = json.dumps(data_summary_converted, indent=4)
-    escaped_data_summary = escape_curly_braces(data_summary_str)
-
-    # Now define the report_generation_agent, since we need inputs['company_name']
-    report_generation_agent = Agent(
-        role='Report Generation Agent',
-        goal='Compile findings into comprehensive and precise reports for stakeholders, summarizing credit assessments',
-        backstory=f"""You specialize in transforming analytical findings into clear, detailed reports.
+        # Now define the report_generation_agent, since we need inputs['company_name']
+        report_generation_agent = Agent(
+            role='Report Generation Agent',
+            goal='Compile findings into comprehensive and precise reports for stakeholders, summarizing credit assessments',
+            backstory=f"""You specialize in transforming analytical findings into clear, detailed reports.
 Your reports facilitate informed decision-making for stakeholders.
 You ensure that the reports accurately reflect the data interpretations and calculations based on the specified dataset structure and key terms.
-The final report should include the following sections:
-
-1. **Overview**:
-    - Mention the name of the company ({inputs['company_name']}) and briefly describe what sections the report contains for reader reference.
-
-2. **Financial Analysis on Key Metrics**:
-    - Present the numbers and their brief descriptions together as bullet points first.
-    - Then provide any comments on the financial data.
-    - Make the information readable and easy to understand.
-
-3. **Conclusions and Commentary: SWOT Analysis**:
-    - Focus on what qualifies or disqualifies this business as credit-worthy.
-    - Use financial information to support your points.
-    - Emphasize aspects related to creditworthiness.
-
-4. **Overall Assessment on Creditworthiness**:
-    - Summarize the findings in an easy-to-read manner.
-    - Keep the final creditworthiness score on a separate line towards the end.
-
-Ensure that the report is well-structured, clear, and follows the specified formatting.""",
-        verbose=True,
-        allow_delegation=False
-    )
-    # Now define the tasks, including the escaped data summary
-
-    task1 = Task(
-        description=f"""Confirm receipt of the data and initiate the credit assessment process.
-Ensure that the team is fully aware of the key terms and dataset structure provided, and emphasize the importance of interpreting the data exactly as specified.
-
-{key_terms_and_structure}
-
-Provide confirmation of data receipt and process initiation.""",
-        expected_output="Confirmation of data receipt and process initiation, with acknowledgment of data interpretation guidelines",
-        agent=credit_decision_manager
-    )
-
-    task2 = Task(
-        description=f"""Analyze the preprocessed financial data provided in 'data_summary' to prepare signals and insights for determining creditworthiness.
-
-Data Summary:
-{escaped_data_summary}
-
-Ensure that you interpret the data exactly as specified, correctly apply the column relations in your analysis, and prepare signals and insights for determining creditworthiness.
-
-Focus on identifying key financial metrics relevant to creditworthiness, and provide commentary where necessary.
-
-Be as deterministic as possible in your analysis.""",
-        expected_output="Analyzed data with relevant features and insights extracted, including commentary on key metrics",
-        agent=data_ingestion_analyst
-    )
-
-    task3 = Task(
-        description=f"""Using the analyzed data from the Data Ingestion and Analyst Agent, evaluate the creditworthiness of the entity.
-
-Use precise financial metrics and credit scoring models. Ensure that your assessment accurately reflects the data's implications on credit risk.
-
-Prepare the following:
-1. An overall assessment on creditworthiness with a score out of 10.
-2. Conclusions and commentary over the financial data presented as a SWOT analysis (Strengths, Weaknesses, Opportunities, Threats).
-
-Focus the SWOT analysis on what qualifies or disqualifies this business as credit-worthy, emphasizing aspects related to creditworthiness.
-
-Incorporate the specific data provided, ensuring that your assessment is accurate.""",
-        expected_output="Detailed credit risk assessment report, including a SWOT analysis focused on creditworthiness and a creditworthiness score out of 10",
-        agent=credit_risk_assessment
-    )
-
-    task4 = Task(
-        description=f"""Review the outputs from the Data Ingestion and Analyst Agent and the Credit Risk Assessment Agent.
-
-Verify that all calculations and analyses are 100% accurate and reliable. Ensure that the data interpretations and calculations adhere exactly to the specified dataset structure and key terms.
-
-Provide deterministic validation of all computations.
-
-Confirm that the SWOT analysis and creditworthiness score are justified based on the data.
-
-Ensure that the final report will meet the formatting and content requirements specified.""",
-        expected_output="Validation report confirming accuracy or identifying issues, with specific references to data interpretations and assessments",
-        agent=qa_agent
-    )
-
-    task5 = Task(
-        description=f"""Compile the validated findings into a comprehensive and precise report for stakeholders, summarizing the credit assessment.
+All monetary values are in Indian Rupees (INR).
 
 The final report should include the following sections:
 
@@ -416,8 +346,8 @@ The final report should include the following sections:
     - Then provide any comments on the financial data.
     - Make the information readable and easy to understand.
 
-3. **Conclusions and Commentary: SWOT Analysis**:
-    - Focus on what qualifies or disqualifies this business as credit-worthy.
+3. **Credit Risk Analysis**:
+    - Focus on what qualifies or disqualifies this business as credit-worthy based on the available data.
     - Use financial information to support your points.
     - Emphasize aspects related to creditworthiness.
 
@@ -426,28 +356,153 @@ The final report should include the following sections:
     - Keep the final creditworthiness score on a separate line towards the end.
 
 Ensure that the report is well-structured, clear, and follows the specified formatting.
+All monetary values are in Indian Rupees (INR).
 
 Be as deterministic as possible in presenting the findings.""",
-        expected_output="Final credit assessment report ready for stakeholders, including all specified sections",
-        agent=report_generation_agent
-    )
+            verbose=False,
+            allow_delegation=False
+        )
 
-    # Instantiate your crew with a sequential process
-    crew = Crew(
-        agents=[
-            credit_decision_manager,
-            data_ingestion_analyst,
-            credit_risk_assessment,
-            qa_agent,
-            report_generation_agent
-        ],
-        tasks=[task1, task2, task3, task4, task5],
-        verbose=True,
-        process=Process.sequential
-    )
+        # Now define the tasks, including the escaped data summary
 
-    # Get your crew to work!
-    result = crew.kickoff(inputs=inputs)
+        task1 = Task(
+            description=f"""Confirm receipt of the data and initiate the credit assessment process.
+Ensure that the team is fully aware of the key terms and dataset structure provided, and emphasize the importance of interpreting the data exactly as specified.
+All monetary values are in Indian Rupees (INR).
 
-    print("######################")
-    print(result)
+Provide confirmation of data receipt and process initiation.""",
+            expected_output="Confirmation of data receipt and process initiation, with acknowledgment of data interpretation guidelines",
+            agent=credit_decision_manager
+        )
+
+        task2 = Task(
+            description=f"""Analyze the preprocessed financial data provided in 'data_summary' to calculate relevant metrics and prepare signals for determining creditworthiness.
+
+Data Summary:
+{escaped_data_summary}
+
+Ensure that you interpret the data exactly as specified, correctly apply the column relations in your analysis, and prepare signals and insights for determining creditworthiness.
+All monetary values are in Indian Rupees (INR).
+
+Be as deterministic as possible in your analysis.""",
+            expected_output="Analyzed data with relevant metrics calculated and insights extracted",
+            agent=data_ingestion_analyst
+        )
+
+        task3 = Task(
+            description=f"""Using the analyzed data from the Data Ingestion and Analyst Agent, evaluate the creditworthiness of the entity.
+
+Use precise financial metrics to assess credit risk accurately.
+All monetary values are in Indian Rupees (INR).
+
+Prepare the following:
+1. An overall assessment on creditworthiness with a score out of 10.
+2. Conclusions and commentary based on the available data, focusing on what qualifies or disqualifies this business as credit-worthy.
+
+Incorporate the specific data provided, ensuring that your assessment is accurate.""",
+            expected_output="Detailed credit risk assessment report with conclusions and a creditworthiness score out of 10",
+            agent=credit_risk_assessment
+        )
+
+        task4 = Task(
+            description=f"""Review the outputs from the Data Ingestion and Analyst Agent and the Credit Risk Assessment Agent.
+
+Verify that all calculations and analyses are 100% accurate and reliable. Ensure that the data interpretations and calculations adhere exactly to the specified dataset structure and key terms.
+All monetary values are in Indian Rupees (INR).
+
+Provide deterministic validation of all computations.
+
+Confirm that the conclusions and creditworthiness score are justified based on the data.
+
+Ensure that the final report will meet the formatting and content requirements specified.""",
+            expected_output="Validation report confirming accuracy or identifying issues, with specific references to data interpretations and assessments",
+            agent=qa_agent
+        )
+
+        task5 = Task(
+            description=f"""Compile the validated findings into a comprehensive and precise report for stakeholders, summarizing the credit assessment.
+
+The final report should include the following sections:
+
+1. **Overview**:
+    - Mention the name of the company ({inputs['company_name']}) and briefly describe what sections the report contains for reader reference.
+
+2. **Financial Analysis on Key Metrics**:
+    - Present the numbers and their brief descriptions together as bullet points first.
+    - Then provide any comments on the financial data.
+    - Make the information readable and easy to understand.
+
+3. **Credit Risk Analysis**:
+    - Focus on what qualifies or disqualifies this business as credit-worthy based on the available data.
+    - Use financial information to support your points.
+    - Emphasize aspects related to creditworthiness.
+
+4. **Overall Assessment on Creditworthiness**:
+    - Summarize the findings in an easy-to-read manner.
+    - Keep the final creditworthiness score on a separate line towards the end.
+
+Ensure that the report is well-structured, clear, and follows the specified formatting.
+All monetary values are in Indian Rupees (INR).
+
+Be as deterministic as possible in presenting the findings.""",
+            expected_output="Final credit assessment report ready for stakeholders, including all specified sections",
+            agent=report_generation_agent
+        )
+
+        # Instantiate your crew with a sequential process
+        crew = Crew(
+            agents=[
+                credit_decision_manager,
+                data_ingestion_analyst,
+                credit_risk_assessment,
+                qa_agent,
+                report_generation_agent
+            ],
+            tasks=[task1, task2, task3, task4, task5],
+            verbose=True,
+            process=Process.sequential
+        )
+
+        # Display a separator
+        st.markdown('---')
+
+        # Display a loader message with time elapsed
+        status_text = st.empty()
+        start_time = time.time()
+        processing_complete = False
+        result = None
+
+        # Function to run crew.kickoff()
+        def run_crew():
+            nonlocal result
+            result = crew.kickoff(inputs=inputs)
+            nonlocal processing_complete
+            processing_complete = True
+
+        # Start the crew.kickoff() in a separate thread
+        processing_thread = threading.Thread(target=run_crew)
+        processing_thread.start()
+
+        # Update the status message with time elapsed
+        while not processing_complete:
+            elapsed_time = int(time.time() - start_time)
+            status_text.text(f"Processing... Time elapsed: {elapsed_time} seconds")
+            time.sleep(1)
+
+        # After processing is complete
+        total_time = int(time.time() - start_time)
+        status_text.text(f"Processing complete. Total time: {total_time} seconds")
+
+        # Log token usage data in terminal logs
+        # for agent in crew.agents:
+        #     print(f"Token usage for {agent.role}: {agent.token_usage}")
+        print(crew.agents)
+
+        # Display the result as rendered markdown
+        # st.header("{company_name}: Credit Assessment Report")
+        st.markdown(result)
+    else:
+        st.warning("Please provide both the company name and upload the Excel file.")
+
+if __name__ == "__main__":
+    main()
