@@ -496,7 +496,6 @@ Be as deterministic as possible in presenting the findings.""",
         # Log token usage data in terminal logs
         # for agent in crew.agents:
         #     print(f"Token usage for {agent.role}: {agent.token_usage}")
-        print(crew.agents)
 
         # Display the result as rendered markdown
         # st.header("{company_name}: Credit Assessment Report")
