@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 from crewai import Agent, Task, Crew, Process
+import numpy as np
 import pandas as pd
 import json
 
@@ -82,26 +83,36 @@ Column Relations:
 - Returned Charges Excl Gst = Free Replacement Charges Excl Gst + other return charges
 - Total Tax liability = Output Gst - Input Credit Gst
 - Total Charges/Fee (Cost of Doing Business on marketplace) = Delivered Charges Excl Gst + Returned Charges Excl Gst + Free Replacement Charges Excl Gst + Indirect Charges Excl Gst
-- Total Profit = Net Sales Excl Gst - Net Revenue Excl Gst
 - Biggest/Largest Charge/Fee: Charge or fee with the highest absolute value.
 """
 
 # Function to preprocess and analyze the financial data
 
 def preprocess_financial_data(csv_file_path):
+    import pandas as pd
+
     # Load the data
     df = pd.read_excel(csv_file_path)
 
-    # Ensure correct data types
+    # Ensure correct data types for numeric columns
     numeric_columns = [
         'Shipping Discount', 'Self Discount', 'Total Discount', 'Net Sales Excl Gst',
         'Delivered Charges Excl Gst', 'Returned Charges Excl Gst',
         'Free Replacement Charges Excl Gst', 'Indirect Charges Excl Gst',
         'Net Revenue Excl Gst', 'Output Gst', 'Input Credit Gst',
-        'Listing Gmv'
+        'Listing Gmv', 'TCS', 'TDS'
     ]
     for col in numeric_columns:
-        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        else:
+            df[col] = 0
+
+    # Ensure date columns are in datetime format
+    if 'Order Date' in df.columns:
+        df['Order Date'] = pd.to_datetime(df['Order Date'], errors='coerce')
+    else:
+        df['Order Date'] = pd.NaT
 
     # Calculate Total Discount if not present
     if 'Total Discount' not in df.columns or df['Total Discount'].isnull().all():
@@ -118,9 +129,6 @@ def preprocess_financial_data(csv_file_path):
         df['Indirect Charges Excl Gst']
     )
 
-    # Calculate Total Profit
-    df['Total Profit'] = df['Net Sales Excl Gst'] - df['Net Revenue Excl Gst']
-
     # Identify the Biggest/Largest Charge/Fee
     charges_cols = [
         'Delivered Charges Excl Gst',
@@ -130,26 +138,115 @@ def preprocess_financial_data(csv_file_path):
     ]
     df['Biggest Charge/Fee'] = df[charges_cols].abs().max(axis=1)
 
-    # Summarize the data
+    # Additional Metrics
+
+    # Total number of orders
+    total_orders = len(df)
+
+    # Total Net Sales
+    total_net_sales = df['Net Sales Excl Gst'].sum()
+
+    # Average Order Value (AOV)
+    average_order_value = total_net_sales / total_orders if total_orders > 0 else 0
+
+    # Total Discount
+    total_discount = df['Total Discount'].sum()
+
+    # Discount as a percentage of Net Sales Excl Gst
+    discount_percentage = (total_discount / total_net_sales * 100) if total_net_sales > 0 else 0
+
+    # SKUs discount coverage: percentage of SKUs that had discounts
+    if 'SKU ID' in df.columns:
+        total_skus = df['SKU ID'].nunique()
+        skus_with_discount = df[df['Total Discount'] > 0]['SKU ID'].nunique()
+        skus_discount_coverage = (skus_with_discount / total_skus * 100) if total_skus > 0 else 0
+    else:
+        total_skus = 0
+        skus_discount_coverage = 0
+
+    # Self Discount and Shipping Discount ratio
+    total_self_discount = df['Self Discount'].sum()
+    total_shipping_discount = df['Shipping Discount'].sum()
+    total_discounts = total_self_discount + total_shipping_discount
+    self_discount_ratio = (total_self_discount / total_discounts * 100) if total_discounts > 0 else 0
+    shipping_discount_ratio = (total_shipping_discount / total_discounts * 100) if total_discounts > 0 else 0
+
+    # Return rate
+    if 'Order Status' in df.columns:
+        total_returns = df[df['Order Status'].str.lower().isin(['returned', 'free_replacement'])].shape[0]
+        return_rate = (total_returns / total_orders * 100) if total_orders > 0 else 0
+    else:
+        return_rate = 0
+
+    # Cost of return as a percentage of sales
+    total_return_charges = df['Returned Charges Excl Gst'].sum()
+    cost_of_return_percentage = (total_return_charges / total_net_sales * 100) if total_net_sales > 0 else 0
+
+    # Logistics cost as a percentage of sales
+    total_delivered_charges = df['Delivered Charges Excl Gst'].sum()
+    logistics_cost_percentage = (total_delivered_charges / total_net_sales * 100) if total_net_sales > 0 else 0
+
+    # SKU-wise sales
+    sku_sales = df.groupby('SKU ID')['Net Sales Excl Gst'].sum()
+    # SKUs contributing to 80% of sales
+    sku_sales_sorted = sku_sales.sort_values(ascending=False)
+    cumulative_sales = sku_sales_sorted.cumsum()
+    total_sales = sku_sales_sorted.sum()
+    skus_contributing_80_percent_sales = cumulative_sales[cumulative_sales <= 0.8 * total_sales].count()
+
+    # Active days (business transaction period)
+    min_order_date = df['Order Date'].min()
+    max_order_date = df['Order Date'].max()
+    days_active = (max_order_date - min_order_date).days + 1 if pd.notnull(min_order_date) and pd.notnull(max_order_date) else 0
+
+    # Total categories
+    total_categories = df['Product Category'].nunique() if 'Product Category' in df.columns else 0
+
+    # Assemble the summary
     summary = {
-        'Total Discount Sum': df['Total Discount'].sum(),
+        'Total Discount Sum': total_discount,
         'Total Tax Liability Sum': df['Total Tax liability'].sum(),
         'Total Charges/Fee Sum': df['Total Charges/Fee'].sum(),
-        'Total Profit Sum': df['Total Profit'].sum(),
         'Average Biggest Charge/Fee': df['Biggest Charge/Fee'].mean(),
-        'Total Net Sales Excl Gst': df['Net Sales Excl Gst'].sum(),
+        'Total Net Sales Excl Gst': total_net_sales,
         'Total Net Revenue Excl Gst': df['Net Revenue Excl Gst'].sum(),
         'Total Listing Gmv': df['Listing Gmv'].sum(),
-        'Total Orders': len(df),
+        'Total Orders': total_orders,
+        'Average Order Value': average_order_value,
+        'Discount Percentage': discount_percentage,
+        'SKUs Discount Coverage Percentage': skus_discount_coverage,
+        'Self Discount Ratio': self_discount_ratio,
+        'Shipping Discount Ratio': shipping_discount_ratio,
+        'Return Rate': return_rate,
+        'Cost of Return Percentage': cost_of_return_percentage,
+        'Logistics Cost Percentage': logistics_cost_percentage,
+        'SKUs Contributing 80% of Sales': skus_contributing_80_percent_sales,
+        'Days Active': days_active,
+        'Total SKUs': total_skus,
+        'Total Categories': total_categories,
         # Add more summary metrics as needed
     }
 
-    # Return the preprocessed data and summary
     return df, summary
 
 # Function to escape curly braces in strings
 def escape_curly_braces(s):
     return s.replace('{', '{{').replace('}', '}}')
+
+# Function to convert NumPy data types to native Python data types
+def convert_numpy_types(obj):
+    if isinstance(obj, dict):
+        return {k: convert_numpy_types(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(v) for v in obj]
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    else:
+        return obj
 
 if __name__ == "__main__":
     inputs = {
@@ -165,11 +262,14 @@ if __name__ == "__main__":
     # Preprocess the data
     df, data_summary = preprocess_financial_data(inputs['csv_file'])
 
+    # Convert NumPy data types to native Python types
+    data_summary_converted = convert_numpy_types(data_summary)
+
     # Include the data summary in inputs for agents to use
-    inputs['data_summary'] = data_summary
+    inputs['data_summary'] = data_summary_converted
 
     # Convert data_summary to a JSON-formatted string and escape curly braces
-    data_summary_str = json.dumps(data_summary, indent=4)
+    data_summary_str = json.dumps(data_summary_converted, indent=4)
     escaped_data_summary = escape_curly_braces(data_summary_str)
 
     # Now define the report_generation_agent, since we need inputs['company_name']
@@ -202,7 +302,6 @@ Ensure that the report is well-structured, clear, and follows the specified form
         verbose=True,
         allow_delegation=False
     )
-
     # Now define the tasks, including the escaped data summary
 
     task1 = Task(
