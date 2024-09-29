@@ -85,7 +85,7 @@ def preprocess_financial_data(file):
     import numpy as np
 
     # Load the data
-    df = pd.read_excel(file)
+    df = pd.read_csv(file)
 
     # Ensure correct data types for numeric columns
     numeric_columns = [
@@ -301,12 +301,19 @@ def preprocess_financial_data(file):
 
 # Streamlit App
 def main():
-    st.title("Credit Risk Assessment Application")
+    # Create two columns for the logo and the title
+    col1, col2 = st.columns([1, 4])
+
+    with col1:
+        st.image('assets/moneyflo_logo.png', width=100)
+
+    with col2:
+        st.title("Credit Risk Assessment")
     st.write("Please provide the company details and upload the financial data.")
 
     # Input fields
     company_name = st.text_input("Company Name")
-    uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
+    uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
 
     if company_name and uploaded_file:
         # st.write(f"**Company Name:** {company_name}")
@@ -501,7 +508,7 @@ Be as deterministic as possible in presenting the findings.""",
         # st.header("{company_name}: Credit Assessment Report")
         st.markdown(result)
     else:
-        st.warning("Please provide both the company name and upload the Excel file.")
+        st.warning("Please provide both the company name and upload the CSV file.")
 
 if __name__ == "__main__":
     main()
