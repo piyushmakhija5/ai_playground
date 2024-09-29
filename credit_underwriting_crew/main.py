@@ -90,6 +90,7 @@ Column Relations:
 
 def preprocess_financial_data(csv_file_path):
     import pandas as pd
+    import numpy as np
 
     # Load the data
     df = pd.read_excel(csv_file_path)
@@ -108,9 +109,9 @@ def preprocess_financial_data(csv_file_path):
         else:
             df[col] = 0
 
-    # Ensure date columns are in datetime format
+    # Ensure date columns are in datetime format with specified date format
     if 'Order Date' in df.columns:
-        df['Order Date'] = pd.to_datetime(df['Order Date'], errors='coerce')
+        df['Order Date'] = pd.to_datetime(df['Order Date'], format='%d/%m/%Y', errors='coerce')
     else:
         df['Order Date'] = pd.NaT
 
@@ -149,10 +150,8 @@ def preprocess_financial_data(csv_file_path):
     # Average Order Value (AOV)
     average_order_value = total_net_sales / total_orders if total_orders > 0 else 0
 
-    # Total Discount
-    total_discount = df['Total Discount'].sum()
-
     # Discount as a percentage of Net Sales Excl Gst
+    total_discount = df['Total Discount'].sum()
     discount_percentage = (total_discount / total_net_sales * 100) if total_net_sales > 0 else 0
 
     # SKUs discount coverage: percentage of SKUs that had discounts
@@ -171,11 +170,12 @@ def preprocess_financial_data(csv_file_path):
     self_discount_ratio = (total_self_discount / total_discounts * 100) if total_discounts > 0 else 0
     shipping_discount_ratio = (total_shipping_discount / total_discounts * 100) if total_discounts > 0 else 0
 
-    # Return rate
+    # Return rate (Return Percentage/Return Ratio)
     if 'Order Status' in df.columns:
         total_returns = df[df['Order Status'].str.lower().isin(['returned', 'free_replacement'])].shape[0]
         return_rate = (total_returns / total_orders * 100) if total_orders > 0 else 0
     else:
+        total_returns = 0
         return_rate = 0
 
     # Cost of return as a percentage of sales
@@ -187,12 +187,15 @@ def preprocess_financial_data(csv_file_path):
     logistics_cost_percentage = (total_delivered_charges / total_net_sales * 100) if total_net_sales > 0 else 0
 
     # SKU-wise sales
-    sku_sales = df.groupby('SKU ID')['Net Sales Excl Gst'].sum()
-    # SKUs contributing to 80% of sales
-    sku_sales_sorted = sku_sales.sort_values(ascending=False)
-    cumulative_sales = sku_sales_sorted.cumsum()
-    total_sales = sku_sales_sorted.sum()
-    skus_contributing_80_percent_sales = cumulative_sales[cumulative_sales <= 0.8 * total_sales].count()
+    if 'SKU ID' in df.columns:
+        sku_sales = df.groupby('SKU ID')['Net Sales Excl Gst'].sum()
+        # SKUs contributing to 80% of sales
+        sku_sales_sorted = sku_sales.sort_values(ascending=False)
+        cumulative_sales = sku_sales_sorted.cumsum()
+        total_sales = sku_sales_sorted.sum()
+        skus_contributing_80_percent_sales = cumulative_sales[cumulative_sales <= 0.8 * total_sales].count()
+    else:
+        skus_contributing_80_percent_sales = 0
 
     # Active days (business transaction period)
     min_order_date = df['Order Date'].min()
@@ -201,6 +204,32 @@ def preprocess_financial_data(csv_file_path):
 
     # Total categories
     total_categories = df['Product Category'].nunique() if 'Product Category' in df.columns else 0
+
+    # Order and Net Sales Growth over Weeks/Months
+    if 'Order Date' in df.columns and df['Order Date'].notnull().any():
+        df['Order Month'] = df['Order Date'].dt.to_period('M')
+        orders_per_month = df.groupby('Order Month').size()
+        net_sales_per_month = df.groupby('Order Month')['Net Sales Excl Gst'].sum()
+
+        # Convert Period index to string
+        orders_per_month.index = orders_per_month.index.astype(str)
+        net_sales_per_month.index = net_sales_per_month.index.astype(str)
+
+        # Calculate month-over-month growth rates
+        order_growth = orders_per_month.pct_change().fillna(0) * 100
+        net_sales_growth = net_sales_per_month.pct_change().fillna(0) * 100
+
+        # Average growth rates
+        average_order_growth = order_growth.mean()
+        average_net_sales_growth = net_sales_growth.mean()
+
+        # Additional return metrics over time
+        returns_per_month = df[df['Order Status'].str.lower().isin(['returned', 'free_replacement'])].groupby('Order Month').size()
+        returns_per_month.index = returns_per_month.index.astype(str)
+        return_rate_per_month = (returns_per_month / orders_per_month * 100).fillna(0)
+    else:
+        average_order_growth = 0
+        average_net_sales_growth = 0
 
     # Assemble the summary
     summary = {
@@ -224,6 +253,15 @@ def preprocess_financial_data(csv_file_path):
         'Days Active': days_active,
         'Total SKUs': total_skus,
         'Total Categories': total_categories,
+        'Average Monthly Order Growth (%)': average_order_growth,
+        'Average Monthly Net Sales Growth (%)': average_net_sales_growth,
+        # Include time series data if needed
+        # Remember to convert keys to strings
+        'Orders Per Month': orders_per_month.to_dict(),
+        'Net Sales Per Month': net_sales_per_month.to_dict(),
+        'Order Growth Rate Per Month (%)': order_growth.to_dict(),
+        'Net Sales Growth Rate Per Month (%)': net_sales_growth.to_dict(),
+        'Return Rate Per Month (%)': return_rate_per_month.to_dict(),
         # Add more summary metrics as needed
     }
 
@@ -236,7 +274,7 @@ def escape_curly_braces(s):
 # Function to convert NumPy data types to native Python data types
 def convert_numpy_types(obj):
     if isinstance(obj, dict):
-        return {k: convert_numpy_types(v) for k, v in obj.items()}
+        return {convert_numpy_types(k): convert_numpy_types(v) for k, v in obj.items()}
     elif isinstance(obj, list):
         return [convert_numpy_types(v) for v in obj]
     elif isinstance(obj, np.integer):
@@ -245,8 +283,13 @@ def convert_numpy_types(obj):
         return float(obj)
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
+    elif isinstance(obj, pd.Period):
+        return str(obj)
+    elif pd.isna(obj):
+        return None
     else:
         return obj
+
 
 if __name__ == "__main__":
     inputs = {
