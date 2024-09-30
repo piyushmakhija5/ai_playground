@@ -4,6 +4,7 @@ from crewai import Agent, Task, Crew, Process
 import pandas as pd
 import numpy as np
 import json
+import re
 import streamlit as st
 import time
 import threading
@@ -25,7 +26,7 @@ All monetary values are in Indian Rupees (INR).""",
 
 data_ingestion_analyst = Agent(
     role='Data Ingestion and Analyst Agent',
-    goal='Analyze preprocessed financial data to prepare signals for creditworthiness determination',
+    goal='Analyze preprocessed financial data to prepare signals for determining creditworthiness',
     backstory="""You specialize in handling financial data that has been preprocessed.
 You interpret the provided data exactly as specified and extract relevant features and insights for credit assessment.
 All monetary values are in Indian Rupees (INR).""",
@@ -38,7 +39,7 @@ credit_risk_assessment = Agent(
     goal='Evaluate the creditworthiness of entities using precise financial metrics',
     backstory="""You are an expert in financial analysis and risk modeling.
 You use the provided metrics to assess credit risk accurately.
-Based on the available data, you will adjust the existing credit score by +/- 20 points, focusing on what qualifies or disqualifies this business as credit-worthy.
+Based on the available data, you will adjust the existing credit score in a context-dependent manner, focusing on what qualifies or disqualifies this business as credit-worthy.
 All monetary values are in Indian Rupees (INR).""",
     verbose=False,
     allow_delegation=False
@@ -52,6 +53,7 @@ Your attention to detail ensures that all findings are precise before they are f
 You verify that the data interpretations and calculations adhere exactly to the specified dataset structure and key terms.
 Confirm that the final report meets the formatting and content requirements.
 Ensure that only information derived from the 'data_summary' is included in the updated credit report.
+Ensure that the credit score adjustment is appropriate given the initial credit score and the analysis.
 All monetary values are in Indian Rupees (INR).""",
     verbose=False,
     allow_delegation=False
@@ -233,7 +235,7 @@ def preprocess_financial_data(file):
 
     # Cost of Doing Business Percentage
     total_charges_fee = df['Total Charges/Fee'].sum()
-    codb_percentage = (total_charges_fee / total_net_sales * 100) if total_net_sales > 0 else 0
+    codb_percentage = (np.abs(total_charges_fee) / total_net_sales * 100) if total_net_sales > 0 else 0
 
     # Total Tax Liability Percentage
     total_tax_liability = df['Total Tax liability'].sum()
@@ -340,6 +342,21 @@ def load_base_report(company_name):
         st.error('No base report found for the provided company name.')
         return None
 
+
+def extract_initial_credit_score(before_report):
+    # match = re.search(r'Credit Score\s*:\s*(\d+)\s*\((.*?)\)', before_report, re.IGNORECASE)
+    pattern = r"\*\*Credit Score:\*\* (\d+) \((\w+)\)"
+    # Find match
+    match = re.search(pattern, before_report)
+
+    if match:
+        score = match.group(1)  # Extracts score
+        rating = match.group(2)  # Extracts rating
+        print(f"Score: {score}, Rating: {rating}")
+        return score, rating
+    else:
+        print("No match found")
+
 # Streamlit App
 def main():
     # Create two columns for the logo and the title
@@ -366,17 +383,25 @@ def main():
         st.markdown('## Original Credit Report')
         st.markdown(before_report)
 
+        # Extract the initial credit score
+        initial_credit_score, initial_rating = extract_initial_credit_score(before_report)
+        if initial_credit_score is None:
+            st.error('Could not extract the initial credit score from the report.')
+            st.stop()
+
         # Preprocess the data
         df, data_summary = preprocess_financial_data(uploaded_file)
 
         # Convert data types
         data_summary_converted = convert_numpy_types(data_summary)
 
-        # Include the data summary in inputs for agents to use
+        # Include the data summary and initial credit score in inputs for agents to use
         inputs = {
             "company_name": company_name,
             "data_summary": data_summary_converted,
-            "before_report": before_report
+            "before_report": before_report,
+            "initial_credit_score": initial_credit_score,
+            "initial_rating": initial_rating
         }
 
         # Convert data_summary to a JSON-formatted string and escape curly braces
@@ -395,7 +420,7 @@ All monetary values are in Indian Rupees (INR).
 When updating the credit report, only include information that can be derived from the 'data_summary' provided.
 Do not include any information that is not present in the 'data_summary'.
 
-Adjust the credit score by modifying it by +/- 20 points based on the analysis of the alternative data.
+Adjust the credit score in a context-dependent manner, based on the initial credit score ({inputs['initial_credit_score']}) and the analysis of the alternative data.
 
 Ensure that the report uses the same credit scale and format as the original credit report.
 
@@ -405,7 +430,7 @@ In the summary section, only provide strong positive or negative information, or
 
 Highlight recommendations for negative signals.
 
-Ensure that the summary section starts with the same format as the original report and includes the credit score.
+Ensure that the summary section starts with the same format as the original report and includes the adjusted credit score.
 
 Be as deterministic as possible in presenting the findings.""",
             verbose=False,
@@ -438,15 +463,21 @@ Be as deterministic as possible in your analysis.""",
         )
 
         task3 = Task(
-            description=f"""Using the analyzed data from the Data Ingestion and Analyst Agent, evaluate the creditworthiness of the entity.
+    description=f"""Using the analyzed data from the Data Ingestion and Analyst Agent, evaluate the creditworthiness of the entity.
 
 Use precise financial metrics to assess credit risk accurately.
 
 All monetary values are in Indian Rupees (INR).
 
-Based on the analysis of the alternative data ('data_summary'), prepare the following:
+Based on the analysis of the alternative data ('data_summary') and the initial credit score ({inputs['initial_credit_score']}), adjust the credit score in a context-dependent manner:
 
-1. Adjust the existing credit score from the before report by modifying it by +/- 20 points based on the alternative data.
+- For companies with high initial scores (e.g., above 800), negative signals have a larger impact in decreasing the score, while positive signals have a smaller impact.
+- For companies with average initial scores (e.g., around 650-750), both positive and negative signals can affect the score significantly.
+- For companies with low initial scores (e.g., below 500), positive signals have a larger impact in increasing the score, while negative signals have a smaller impact.
+
+**Ensure that the adjusted credit score is modified by a maximum of ±25 points**.
+
+1. Adjusted credit score based on the context-dependent analysis.
 2. Conclusions and commentary based on the available data, focusing on what qualifies or disqualifies this business as credit-worthy.
 
 Incorporate the specific data provided in 'data_summary', ensuring that your assessment is accurate.
@@ -454,9 +485,39 @@ Incorporate the specific data provided in 'data_summary', ensuring that your ass
 Only use information derived from 'data_summary' for your evaluation.
 
 Do not include any information that is not provided in 'data_summary'.""",
-            expected_output="Detailed credit risk assessment report with conclusions and an adjusted credit score, modifying the existing score by +/- 20 points based on the analysis.",
-            agent=credit_risk_assessment
-        )
+    expected_output="Detailed credit risk assessment report with conclusions and an adjusted credit score, based on the context-dependent analysis.",
+    agent=credit_risk_assessment
+)
+
+
+#         task3 = Task(
+#             description=f"""Using the analyzed data from the Data Ingestion and Analyst Agent, evaluate the creditworthiness of the entity.
+
+# Use precise financial metrics to assess credit risk accurately.
+
+# All monetary values are in Indian Rupees (INR).
+
+# Based on the analysis of the alternative data ('data_summary') and the initial credit score ({inputs['initial_credit_score']}), adjust the credit score in a context-dependent manner:
+
+# - For companies with high initial scores (e.g., above 800), negative signals have a larger impact in decreasing the score, while positive signals have a smaller impact.
+# - For companies with average initial scores (e.g., around 650-750), both positive and negative signals can affect the score significantly.
+# - For companies with low initial scores (e.g., below 500), positive signals have a larger impact in increasing the score, while negative signals have a smaller impact.
+
+# Ensure that the adjusted credit score remains within the valid range (e.g., 300 to 900).
+
+# Prepare the following:
+
+# 1. Adjusted credit score based on the context-dependent analysis.
+# 2. Conclusions and commentary based on the available data, focusing on what qualifies or disqualifies this business as credit-worthy.
+
+# Incorporate the specific data provided in 'data_summary', ensuring that your assessment is accurate.
+
+# Only use information derived from 'data_summary' for your evaluation.
+
+# Do not include any information that is not provided in 'data_summary'.""",
+#             expected_output="Detailed credit risk assessment report with conclusions and an adjusted credit score, based on the context-dependent analysis.",
+#             agent=credit_risk_assessment
+#         )
 
         task4 = Task(
             description=f"""Review the outputs from the Data Ingestion and Analyst Agent and the Credit Risk Assessment Agent.
@@ -475,7 +536,9 @@ Ensure that the summary section only provides strong positive or negative inform
 
 Confirm that recommendations are highlighted for negative signals.
 
-Ensure that the summary section starts with the same format as the original report and includes the credit score.
+Ensure that the summary section starts with the same format as the original report and includes the adjusted credit score.
+
+Ensure that the adjusted credit score is appropriate given the initial credit score ({inputs['initial_credit_score']}) and the analysis.
 
 All monetary values are in Indian Rupees (INR).
 
@@ -501,11 +564,11 @@ Update the report by including the alternative data from 'data_summary' and high
 Ensure that the updated report includes the following:
 
 - Use the same credit scale and format as the original credit report.
-- Adjust the credit score by modifying it by +/- 20 points based on the analysis of the alternative data.
+- Adjust the credit score in a context-dependent manner, based on the initial credit score ({inputs['initial_credit_score']}) and the analysis of the alternative data.
 - In the financial summary section, include detailed numbers, preferably in tabular form, using the alternative data. Make sure these numbers are 100% accurate.
 - In the summary section, only provide strong positive or negative information, or things that need to be monitored.
 - Highlight recommendations for negative signals.
-- Ensure that the summary section starts with the same format as the original report and includes the credit score.
+- Ensure that the summary section starts with the same format as the original report and includes the adjusted credit score.
 - Only add information that can be derived from the 'data_summary'.
 - Do not include any information that is not provided in the 'data_summary'.
 
