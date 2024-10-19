@@ -235,7 +235,7 @@ def preprocess_financial_data(file):
 
     # Cost of Doing Business Percentage
     total_charges_fee = df['Total Charges/Fee'].sum()
-    codb_percentage = (np.abs(total_charges_fee) / total_net_sales * 100) if total_net_sales > 0 else 0
+    codb_percentage = (total_charges_fee / total_net_sales * 100) if total_net_sales > 0 else 0
 
     # Total Tax Liability Percentage
     total_tax_liability = df['Total Tax liability'].sum()
@@ -302,32 +302,12 @@ def preprocess_financial_data(file):
 
     return df, summary
 
-# # Function to display the before credit report
-# def load_before_report(company_name):
-#     # Map company names to report filenames
-#     company_reports = {
-#         'Good Corp Pvt. Ltd.': 'Good_Corp_Credit_Report.md',
-#         'Average Corp Pvt. Ltd.': 'Average_Corp_Credit_Report.md',
-#         'Bad Corp Pvt. Ltd.': 'Bad_Corp_Credit_Report.md'
-#     }
-
-#     report_file = company_reports.get(company_name, None)
-
-#     if report_file and os.path.exists(report_file):
-#         with open(report_file, 'r') as f:
-#             before_report = f.read()
-#             st.markdown(before_report)
-#             return before_report
-#     else:
-#         st.warning("No matching credit report found for the given company name.")
-#         return None
-
 def load_base_report(company_name):
     # Map company names to filenames
     company_to_filename = {
-        'Good Corp': 'Good_Corp_Credit_Report.md',
-        'Average Corp': 'Average_Corp_Credit_Report.md',
-        'Bad Corp': 'Bad_Corp_Credit_Report.md',
+        'Good Corp Pvt. Ltd.': 'Good_Corp_Credit_Report.md',
+        'Average Corp Pvt. Ltd.': 'Average_Corp_Credit_Report.md',
+        'Bad Corp Pvt. Ltd.': 'Bad_Corp_Credit_Report.md',
     }
     filename = company_to_filename.get(company_name)
     if filename:
@@ -336,26 +316,24 @@ def load_base_report(company_name):
                 report = file.read()
             return report
         except FileNotFoundError:
-            st.error(f'Base report file {filename} not found.')
+            st.error(f'Base report file "{filename}" not found in the "reports" directory.')
             return None
     else:
         st.error('No base report found for the provided company name.')
         return None
 
-
 def extract_initial_credit_score(before_report):
-    # match = re.search(r'Credit Score\s*:\s*(\d+)\s*\((.*?)\)', before_report, re.IGNORECASE)
-    pattern = r"\*\*Credit Score:\*\* (\d+) \((\w+)\)"
+    # Updated regex to account for '**' surrounding "Credit Score"
+    pattern = r"\*\*Credit Score:\*\*\s*(\d+)\s*\((.*?)\)"
     # Find match
     match = re.search(pattern, before_report)
 
     if match:
         score = match.group(1)  # Extracts score
         rating = match.group(2)  # Extracts rating
-        print(f"Score: {score}, Rating: {rating}")
         return score, rating
     else:
-        print("No match found")
+        return None, None
 
 # Streamlit App
 def main():
@@ -391,6 +369,10 @@ def main():
 
         # Preprocess the data
         df, data_summary = preprocess_financial_data(uploaded_file)
+
+        if df is None or data_summary is None:
+            st.error('Data preprocessing failed. Please check your CSV file.')
+            st.stop()
 
         # Convert data types
         data_summary_converted = convert_numpy_types(data_summary)
@@ -430,6 +412,18 @@ In the summary section, only provide strong positive or negative information, or
 
 Highlight recommendations for negative signals.
 
+**Color Coding for Changes:**
+
+- **Positive Changes**: Highlight in **green**.
+- **Negative Changes**: Highlight in **red**.
+- **Neutral Changes**: Highlight in **blue**.
+
+Use HTML `<span>` tags with inline CSS styles to apply the colors. For example:
+
+- `<span style="color:green">Positive change text</span>`
+- `<span style="color:red">Negative change text</span>`
+- `<span style="color:blue">Neutral change text</span>`
+
 Ensure that the summary section starts with the same format as the original report and includes the adjusted credit score.
 
 Be as deterministic as possible in presenting the findings.""",
@@ -463,7 +457,7 @@ Be as deterministic as possible in your analysis.""",
         )
 
         task3 = Task(
-    description=f"""Using the analyzed data from the Data Ingestion and Analyst Agent, evaluate the creditworthiness of the entity.
+            description=f"""Using the analyzed data from the Data Ingestion and Analyst Agent, evaluate the creditworthiness of the entity.
 
 Use precise financial metrics to assess credit risk accurately.
 
@@ -485,39 +479,9 @@ Incorporate the specific data provided in 'data_summary', ensuring that your ass
 Only use information derived from 'data_summary' for your evaluation.
 
 Do not include any information that is not provided in 'data_summary'.""",
-    expected_output="Detailed credit risk assessment report with conclusions and an adjusted credit score, based on the context-dependent analysis.",
-    agent=credit_risk_assessment
-)
-
-
-#         task3 = Task(
-#             description=f"""Using the analyzed data from the Data Ingestion and Analyst Agent, evaluate the creditworthiness of the entity.
-
-# Use precise financial metrics to assess credit risk accurately.
-
-# All monetary values are in Indian Rupees (INR).
-
-# Based on the analysis of the alternative data ('data_summary') and the initial credit score ({inputs['initial_credit_score']}), adjust the credit score in a context-dependent manner:
-
-# - For companies with high initial scores (e.g., above 800), negative signals have a larger impact in decreasing the score, while positive signals have a smaller impact.
-# - For companies with average initial scores (e.g., around 650-750), both positive and negative signals can affect the score significantly.
-# - For companies with low initial scores (e.g., below 500), positive signals have a larger impact in increasing the score, while negative signals have a smaller impact.
-
-# Ensure that the adjusted credit score remains within the valid range (e.g., 300 to 900).
-
-# Prepare the following:
-
-# 1. Adjusted credit score based on the context-dependent analysis.
-# 2. Conclusions and commentary based on the available data, focusing on what qualifies or disqualifies this business as credit-worthy.
-
-# Incorporate the specific data provided in 'data_summary', ensuring that your assessment is accurate.
-
-# Only use information derived from 'data_summary' for your evaluation.
-
-# Do not include any information that is not provided in 'data_summary'.""",
-#             expected_output="Detailed credit risk assessment report with conclusions and an adjusted credit score, based on the context-dependent analysis.",
-#             agent=credit_risk_assessment
-#         )
+            expected_output="Detailed credit risk assessment report with conclusions and an adjusted credit score, based on the context-dependent analysis.",
+            agent=credit_risk_assessment
+        )
 
         task4 = Task(
             description=f"""Review the outputs from the Data Ingestion and Analyst Agent and the Credit Risk Assessment Agent.
@@ -570,16 +534,26 @@ Ensure that the updated report includes the following:
 - Highlight recommendations for negative signals.
 - Ensure that the summary section starts with the same format as the original report and includes the adjusted credit score.
 - Only add information that can be derived from the 'data_summary'.
-- Do not include any information that is not provided in the 'data_summary'.
+- Do not include any information that is not provided in 'data_summary'.
 
-Highlight the sections that have been updated or impacted by the alternative data. Use bold text or color coding (e.g., <span style="color:red">updated text</span>) to indicate changes.
+**Color Coding for Changes:**
 
-Ensure that the report is well-structured, clear, and follows the specified formatting.
+- **Positive Changes**: Highlight in **green**.
+- **Negative Changes**: Highlight in **red**.
+- **Neutral Changes**: Highlight in **blue**.
 
-All monetary values are in Indian Rupees (INR).
+**Implementation:**
+
+Use HTML `<span>` tags with inline CSS styles to apply the colors. For example:
+
+- `<span style="color:green">Positive change text</span>`
+- `<span style="color:red">Negative change text</span>`
+- `<span style="color:blue">Neutral change text</span>`
+
+Ensure that the summary section starts with the same format as the original report and includes the adjusted credit score.
 
 Be as deterministic as possible in presenting the findings.""",
-            expected_output="Updated credit report with sections impacted by alternative data highlighted, including a detailed financial summary with accurate numbers, and an appropriate summary section as per the requirements.",
+            expected_output="Updated credit report with sections impacted by alternative data highlighted using green for positive changes, red for negative changes, and blue for neutral changes, including a detailed financial summary with accurate numbers.",
             agent=report_generation_agent
         )
 
@@ -609,9 +583,13 @@ Be as deterministic as possible in presenting the findings.""",
         # Function to run crew.kickoff()
         def run_crew():
             nonlocal result
-            result = crew.kickoff(inputs=inputs)
-            nonlocal processing_complete
-            processing_complete = True
+            try:
+                result = crew.kickoff(inputs=inputs)
+            except Exception as e:
+                result = f"An error occurred during processing: {e}"
+            finally:
+                nonlocal processing_complete
+                processing_complete = True
 
         # Start the crew.kickoff() in a separate thread
         processing_thread = threading.Thread(target=run_crew)
