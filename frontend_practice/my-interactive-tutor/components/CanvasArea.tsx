@@ -8,14 +8,6 @@ export default function CanvasArea() {
     // Implement your pen drawing logic
   };
 
-  const handleHint = () => {
-    // ...
-  };
-
-  const handleSolution = () => {
-    // ...
-  };
-
   return (
     <div style={{ flex: 1, position: "relative" }}>
       <canvas
@@ -28,12 +20,6 @@ export default function CanvasArea() {
           backgroundColor: "#fff"
         }}
       />
-      <div style={{ marginTop: "0.5rem" }}>
-        <button onClick={handleHint}>Hint</button>
-        <button onClick={handleSolution} style={{ marginLeft: "0.5rem" }}>
-          Solution
-        </button>
-      </div>
     </div>
   );
 }
