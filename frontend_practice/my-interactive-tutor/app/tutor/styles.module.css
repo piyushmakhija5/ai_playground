@@ -1,0 +1,47 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Area under the navbar */
+.mainArea {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+
+/* The area that contains question/canvas + AI panel. */
+.content {
+  display: flex;
+  flex: 1; /* fill remaining horizontal space */
+}
+
+/* The center pane holds question + canvas stacked */
+.centerPane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;     /* fill leftover space horizontally */
+  overflow-y: auto;
+  padding: 1rem;
+  border-right: 1px solid #ccc;
+}
+
+/* AI response is on the right */
+.aiPanel {
+  width: 300px; /* or whatever width you prefer */
+  background: #fff;
+  border-left: 1px solid #ccc;
+  overflow-y: auto;  /* scroll if the content is long */
+  padding: 1rem;
+  box-sizing: border-box;
+}
+
+.questionDisplay {
+  display: flex;           /* horizontal flex */
+  flex-direction: row;
+  border-bottom: 1px solid #ccc;
+  padding-bottom: 1rem;
+  margin-bottom: 1rem;
+}
