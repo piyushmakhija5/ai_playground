@@ -1,0 +1,42 @@
+teach-ai/
+├── app/
+│   ├── api/
+│   │   └── questions/
+│   │       └── route.ts
+│   ├── layout.tsx
+│   ├── page.tsx
+│   ├── globals.css
+│   └── favicon.ico
+├── components/
+│   ├── ui/
+│   │   ├── button.tsx
+│   │   └── card.tsx
+│   ├── layout/
+│   │   ├── Navbar.tsx
+│   │   └── Sidebar.tsx 
+│   ├── canvas/
+│   │   ├── Canvas.tsx
+│   │   └── CanvasControls.tsx
+│   ├── question/
+│   │   └── QuestionCard.tsx
+│   ├── ai/
+│   │   └── AIResponse.tsx
+│   └── InteractiveTutor.tsx
+├── lib/
+│   ├── types/
+│   │   └── index.ts
+│   └── utils/
+│       ├── canvas.ts
+│       └── questions.ts
+├── services/
+│   └── ai.ts
+├── public/
+│   └── questions/
+│       └── .gitkeep
+├── styles/
+│   └── globals.css
+├── tailwind.config.ts
+├── postcss.config.js
+├── next.config.js
+├── tsconfig.json
+└── package.json
